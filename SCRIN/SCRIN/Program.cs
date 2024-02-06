@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Data;
 using System.Data.SqlClient;
+using System.Transactions;
 using System.Xml;
 
 class Program
@@ -68,7 +69,7 @@ class Program
     //Метод для добавления пользователей
     static int InsertUser(SqlConnection connection, string fio, string email, SqlTransaction transaction, int orderNo)
     {
-        int userId = GetUserByFioAndEmail(connection, fio, email, transaction);
+        int userId = GetUserByEmail(connection, email, transaction);
 
         if (userId == -1)
         {
@@ -89,29 +90,49 @@ class Program
         }
         else
         {
-            return userId;
+            using (SqlCommand cmd = new SqlCommand("UPDATE [User] SET username = @username , [mail] = @mail where userId = @userId", connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@username", fio);
+                cmd.Parameters.AddWithValue("@mail", email);
+                cmd.Parameters.AddWithValue("@userId", userId);
+                return Convert.ToInt32(cmd.ExecuteScalar());
+            }
         }
     }
 
     //Метод для добавления заказа
-    static void InsertOrder(SqlConnection connection, int orderNo, int userId, DateTime regDate, decimal orderSum, SqlTransaction transaction)
+    static void InsertOrder(SqlConnection connection, int orderId, int userId, DateTime regDate, decimal orderSum, SqlTransaction transaction)
     {
         try
         {
-            using (SqlCommand cmd = new SqlCommand("INSERT INTO [Order] (orderId, user_userId, OrderDate, [value]) VALUES (@orderNo, @userId, @regDate, @orderSum) SELECT SCOPE_IDENTITY()", connection, transaction))
+            if (OrderExists(connection, orderId, transaction))
             {
-                cmd.Parameters.AddWithValue("@orderNo", orderNo);
-                cmd.Parameters.AddWithValue("@userId", userId);
-                cmd.Parameters.AddWithValue("@regDate", regDate);
-                cmd.Parameters.AddWithValue("@orderSum", orderSum);
+                using (SqlCommand cmd = new SqlCommand("UPDATE [Order] SET orderDate = @regDate, [value] = @orderSum WHERE orderId = @orderId", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@orderId", orderId);
+                    cmd.Parameters.AddWithValue("@regDate", regDate);
+                    cmd.Parameters.AddWithValue("@orderSum", orderSum);
 
-                cmd.ExecuteNonQuery();
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            else
+            {
+                using (SqlCommand cmd = new SqlCommand("INSERT INTO [Order] (orderId, user_userId, OrderDate, [value]) VALUES (@orderId, @userId, @regDate, @orderSum) SELECT SCOPE_IDENTITY()", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@orderId", orderId);
+                    cmd.Parameters.AddWithValue("@userId", userId);
+                    cmd.Parameters.AddWithValue("@regDate", regDate);
+                    cmd.Parameters.AddWithValue("@orderSum", orderSum);
+
+                    cmd.ExecuteNonQuery();
+                }
             }
         }
         catch (Exception ex)
         {
 
-            throw new Exception($"Ошибка добаления заказа номер {orderNo}: {ex.Message}");
+            throw new Exception($"Ошибка добаления заказа номер {orderId}: {ex.Message}");
         }
     }
     //Метод для добавления товаров
@@ -144,13 +165,27 @@ class Program
     {
         try
         {
-            using (SqlCommand cmd = new SqlCommand("INSERT INTO orderlist (order_orderId, product_productId, [count]) VALUES (@orderId, @productId, @quantity)", connection, transaction))
+            if (!ProductInOrderExists(connection, orderId, productId, transaction))
             {
-                cmd.Parameters.AddWithValue("@orderId", orderId);
-                cmd.Parameters.AddWithValue("@productId", productId);
-                cmd.Parameters.AddWithValue("@quantity", quantity);
+                using (SqlCommand cmd = new SqlCommand("INSERT INTO orderlist (order_orderId, product_productId, [count]) VALUES (@orderId, @productId, @quantity)", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@orderId", orderId);
+                    cmd.Parameters.AddWithValue("@productId", productId);
+                    cmd.Parameters.AddWithValue("@quantity", quantity);
 
-                cmd.ExecuteNonQuery();
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            else
+            {
+                using (SqlCommand cmd = new SqlCommand("UPDATE orderlist SET [count] = @quantity WHERE order_orderId = @orderId AND product_productId = @productId", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@orderId", orderId);
+                    cmd.Parameters.AddWithValue("@productId", productId);
+                    cmd.Parameters.AddWithValue("@quantity", quantity);
+
+                    cmd.ExecuteNonQuery();
+                }
             }
         }
         catch (Exception ex)
@@ -171,13 +206,12 @@ class Program
         return number;
     }
     //Метод для проверки существования пользователя по имени и email'у
-    static int GetUserByFioAndEmail(SqlConnection connection, string fio, string email, SqlTransaction transaction)
+    static int GetUserByEmail(SqlConnection connection, string email, SqlTransaction transaction)
     {
         try
         {
-            using (SqlCommand cmd = new SqlCommand("SELECT userid FROM [User] WHERE username = @username AND [mail] = @mail", connection, transaction))
+            using (SqlCommand cmd = new SqlCommand("SELECT userid FROM [User] WHERE [mail] = @mail", connection, transaction))
             {
-                cmd.Parameters.AddWithValue("@username", fio);
                 cmd.Parameters.AddWithValue("@mail", email);
 
                 object result = cmd.ExecuteScalar();
@@ -210,13 +244,24 @@ class Program
             throw new Exception($"Ошибка при обработке товара: {ex.Message}");
         }
     }
+
     //Метод для проверки существования заказа. Не используется в связи с тем, что
     //при существовании заказа база данных сама выкинет исключение
-    static bool OrderExists(SqlConnection connection, int orderNo, SqlTransaction transaction)
+    static bool OrderExists(SqlConnection connection, int orderId, SqlTransaction transaction)
     {
-        using (SqlCommand cmd = new SqlCommand("SELECT COUNT(*) FROM [Order] WHERE orderId = @orderNo", connection, transaction))
+        using (SqlCommand cmd = new SqlCommand("SELECT COUNT(*) FROM [Order] WHERE orderId = @orderId", connection, transaction))
         {
-            cmd.Parameters.AddWithValue("@orderNo", orderNo);
+            cmd.Parameters.AddWithValue("@orderId", orderId);
+            return (int)cmd.ExecuteScalar() > 0;
+        }
+    }
+
+    static bool ProductInOrderExists(SqlConnection connection, int orderId, int productId, SqlTransaction transaction)
+    {
+        using (SqlCommand cmd = new SqlCommand("SELECT COUNT(*) FROM orderlist WHERE order_orderId = @orderId AND product_productId = @productId", connection, transaction))
+        {
+            cmd.Parameters.AddWithValue("@orderId", orderId);
+            cmd.Parameters.AddWithValue("@productId", productId);
             return (int)cmd.ExecuteScalar() > 0;
         }
     }
