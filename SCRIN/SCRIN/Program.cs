@@ -69,11 +69,10 @@ class Program
     //Метод для добавления пользователей
     static int InsertUser(SqlConnection connection, string fio, string email, SqlTransaction transaction, int orderNo)
     {
-        int userId = GetUserByEmail(connection, email, transaction);
-
-        if (userId == -1)
+        if (!(string.IsNullOrEmpty(fio) && string.IsNullOrEmpty(email)))
         {
-            if (!(string.IsNullOrEmpty(fio) || string.IsNullOrEmpty(email)))
+            int userId = GetUserByEmail(connection, email, transaction);
+            if (userId == -1)
             {
                 using (SqlCommand cmd = new SqlCommand("INSERT INTO [User] (username, [mail]) VALUES (@username, @mail) SELECT SCOPE_IDENTITY()", connection, transaction))
                 {
@@ -85,18 +84,21 @@ class Program
             }
             else
             {
-                throw new Exception($"Ошибка при добавлении пользователя в заказе номер {orderNo}");
+                using (SqlCommand cmd = new SqlCommand("UPDATE [User] SET username = @username , [mail] = @mail where userId = @userId", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@username", fio);
+                    cmd.Parameters.AddWithValue("@mail", email);
+                    cmd.Parameters.AddWithValue("@userId", userId);
+
+                    cmd.ExecuteNonQuery();
+
+                    return userId;
+                }
             }
         }
         else
         {
-            using (SqlCommand cmd = new SqlCommand("UPDATE [User] SET username = @username , [mail] = @mail where userId = @userId", connection, transaction))
-            {
-                cmd.Parameters.AddWithValue("@username", fio);
-                cmd.Parameters.AddWithValue("@mail", email);
-                cmd.Parameters.AddWithValue("@userId", userId);
-                return Convert.ToInt32(cmd.ExecuteScalar());
-            }
+            throw new Exception($"Ошибка при добавлении пользователя в заказе номер {orderNo}");
         }
     }
 
@@ -138,11 +140,10 @@ class Program
     //Метод для добавления товаров
     static int InsertProduct(SqlConnection connection, string productName, decimal price, SqlTransaction transaction, int orderNo)
     {
-        int productId = GetProductByName(connection, productName, transaction);
-
-        if (productId == -1)
+        if (!string.IsNullOrEmpty(productName))
         {
-            if (!string.IsNullOrEmpty(productName))
+            int productId = GetProductByName(connection, productName, transaction);
+            if (productId == -1)
             {
                 using (SqlCommand cmd = new SqlCommand("INSERT INTO product (productName, [price]) VALUES (@productName, @price) SELECT SCOPE_IDENTITY()", connection, transaction))
                 {
@@ -154,11 +155,21 @@ class Program
             }
             else
             {
-                throw new Exception($"Ошибка при добавлении товара в заказе под номером {orderNo}");
+                using (SqlCommand cmd = new SqlCommand("UPDATE product SET productName = @productName, price = @price WHERE productId = @productId", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@productName", productName);
+                    cmd.Parameters.AddWithValue("@price", price);
+                    cmd.Parameters.AddWithValue("@productId", productId);
+                    cmd.ExecuteNonQuery();
+
+                    return productId;
+                }
             }
         }
-
-        return productId;
+        else
+        {
+            throw new Exception($"Ошибка при добавлении товара в заказе под номером {orderNo}");
+        }
     }
     //Метод для вставки товаров в заказ
     static void InsertOrderList(SqlConnection connection, int orderId, int productId, int quantity, SqlTransaction transaction)
